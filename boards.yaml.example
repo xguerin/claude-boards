@@ -1,0 +1,13 @@
+board:
+  location: local
+  boards_dir: /tmp/boards
+  poll_interval: 10   # seconds between polls for `claude_boards.watch`; optional, defaults to 10
+
+# SSH example (host/user/port/key_path all required for location: ssh):
+# board:
+#   location: ssh
+#   boards_dir: /home/deploy/boards   # remote path, created automatically
+#   host: example.com
+#   user: deploy
+#   port: 22
+#   key_path: ~/.ssh/id_board         # key-based auth only, no password prompts
