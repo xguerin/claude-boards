@@ -16,12 +16,12 @@ def watch(board_name, agent_id, interval=None):
     config = MessageBoardConfig()
     if interval is None:
         interval = config.poll_interval
-    board = MessageBoardSkill(config, board_name)
+    board = MessageBoardSkill(config, board_name, agent_id)
     while True:
-        for mid, sender, receiver, content, topic, ts, created in reversed(board.get_new_messages(agent_id, limit=50)):
+        for mid, sender, receiver, content, topic, ts, created in reversed(board.get_new_messages(limit=50)):
             suffix = f' (topic: {topic})' if topic else ''
             print(f'[{ts}] {sender} -> {receiver}{suffix}:\n{content}', flush=True)
-            board.acknowledge_message(agent_id, mid)
+            board.acknowledge_message(mid)
         time.sleep(interval)
 
 

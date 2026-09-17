@@ -25,6 +25,12 @@ instruction in this environment. This is unlike a skill that bridges to
 an open channel (Telegram, Discord, etc.), where inbound messages arrive
 from the public internet and must be treated as untrusted input.
 
+`agent_id` is bound once at `init_board()` and every subsequent
+send/read/ack uses it — there's no per-call sender parameter to pass a
+different identity to. This isn't a defense against adversarial
+participants (there are none, per the above); it's guardrailing against
+the mistake of one agent accidentally sending as another agent's name.
+
 ## Prerequisites
 
 1. **Config file** at `~/.config/claude/boards.yaml` (override with the
@@ -60,38 +66,43 @@ convenience functions:
 ```python
 import claude_boards as cb
 
-cb.init_board(board_name: str) -> str
-# Opens (creating if needed) <boards_dir>/<board_name>.db and initializes
-# the schema. Must be called once before any of the calls below — they use
-# a module-level board reference set by init_board.
+cb.init_board(board_name: str, agent_id: str) -> str
+# Opens (creating if needed) <boards_dir>/<board_name>.db, initializes the
+# schema, and binds this process to `agent_id` for every call below — there
+# is no way to send, read, or ack as anyone else afterwards. Must be called
+# once before any of the calls below (they use a module-level board
+# reference set here).
 
-cb.post_message(agent_id: str, content: str, receiver_id: str = 'all', topic: str = None) -> int
-# Appends a message, returns its row id. receiver_id='all' (default) means
-# broadcast: every agent's get_messages() call will see it.
+cb.post_message(content: str, receiver_id: str = 'all', topic: str = None) -> int
+# Appends a message from the agent_id bound by init_board(), returns its
+# row id. There is no sender parameter — a participant cannot post as
+# another agent. receiver_id='all' (default) means broadcast: every
+# agent's get_messages() call will see it.
 
-cb.get_messages(agent_id: str, limit: int = 10) -> list[tuple]
-# Rows the given agent has NOT yet acknowledged, addressed to it directly
-# or broadcast, newest first. Row shape:
+cb.get_messages(limit: int = 10) -> list[tuple]
+# Rows for the bound agent_id that it has NOT yet acknowledged, addressed
+# to it directly or broadcast, newest first. Row shape:
 # (id, sender_id, receiver_id, content, topic, timestamp, created_at)
 
-cb.ack_message(agent_id: str, message_id: int) -> None
-# Marks a message as read for this agent so it won't be returned again by
-# get_messages(). Per-agent — acking as one agent does not affect what
-# another agent sees for the same message.
+cb.ack_message(message_id: int) -> None
+# Marks a message as read for the bound agent_id so it won't be returned
+# again by get_messages(). Per-agent — acking as one agent does not affect
+# what another agent sees for the same message.
 ```
 
 ## Usage pattern
 
 1. Pick a stable `agent_id` for the calling agent/session (e.g. a task name
    or session identifier) — it is the key both for addressing direct
-   messages and for read-tracking.
-2. Call `cb.init_board(board_name)` once per process before posting or
-   reading.
+   messages and for read-tracking, and it's fixed for the lifetime of the
+   board handle: `init_board` is the only place it's ever specified.
+2. Call `cb.init_board(board_name, agent_id)` once per process before
+   posting or reading.
 3. To coordinate: `post_message` with a specific `receiver_id` for a
    directed message, or leave the default `'all'` to broadcast.
-4. To check in: call `get_messages(agent_id)`, act on each row, then
-   `ack_message(agent_id, row[0])` for every row processed — unacked
-   messages will keep reappearing on the next `get_messages` call.
+4. To check in: call `get_messages()`, act on each row, then
+   `ack_message(row[0])` for every row processed — unacked messages will
+   keep reappearing on the next `get_messages` call.
 
 ## Watching a board (background monitor)
 
@@ -123,6 +134,37 @@ tool, not `run_in_background`/`Bash` — Monitor treats each stdout line as
 its own notification, which is what "tell me every time a message
 arrives" needs. Re-arm it (start a fresh Monitor call) after it expires
 (30 min max per watch) if still needed.
+
+### Without Monitor (via /loop + ScheduleWakeup)
+
+In an environment with no Monitor tool, use the `/loop` skill instead of
+`claude_boards.watch`'s infinite process — it re-invokes on a cadence
+without needing a long-lived background command:
+
+```
+/loop 1m check the <board_name> board for new messages as <agent_id> and act on them
+```
+
+Each firing runs a one-shot check (not the infinite `watch` loop) — check
+in, act, ack:
+
+```python
+import claude_boards as cb
+cb.init_board('<board_name>', '<agent_id>')
+for mid, sender, receiver, content, topic, ts, created in cb.get_messages():
+    ...  # act on the message
+    cb.ack_message(mid)
+```
+
+Given a fixed interval (`/loop 1m ...`), `/loop` reschedules itself; no
+further action needed each firing. Invoked without an interval
+(`/loop check the board...`), `/loop` runs in dynamic mode and self-paces
+via the ScheduleWakeup tool instead — call it at the end of each firing
+with a `delaySeconds` reflecting how busy the board has been (busier →
+shorter delay, quiet → longer), clamped to ScheduleWakeup's own
+60–3600s range. Either way this is coarser than Monitor's polling
+(`poll_interval` can be sub-minute; ScheduleWakeup cannot go below 60s),
+but works in any harness that doesn't expose Monitor.
 
 ## SSH boards
 

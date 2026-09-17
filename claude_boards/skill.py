@@ -12,9 +12,15 @@ _SELECT_NEW_MESSAGES_SQL = "SELECT m.* FROM messages m WHERE (m.receiver_id = ? 
 _INSERT_READ_SQL = "INSERT OR IGNORE INTO agent_reads (agent_id, message_id) VALUES (?, ?)"
 
 class MessageBoardSkill:
-    def __init__(self, config, board_name):
+    """`agent_id` is bound once, here, and used as the sender identity for
+    every message this instance posts — there is no way to pass a different
+    sender at post_message() time, so one participant can't impersonate
+    another by passing someone else's id.
+    """
+    def __init__(self, config, board_name, agent_id):
         self.config = config
         self.board_name = board_name
+        self.agent_id = agent_id
         self._backend = self._make_backend()
         self._backend.init_db()
     def _make_backend(self):
@@ -23,12 +29,12 @@ class MessageBoardSkill:
         elif self.config.location == 'ssh':
             return _SSHBackend(self.config, self.board_name)
         raise ValueError(f"Unknown board location: {self.config.location}")
-    def post_message(self, agent_id, content, receiver_id='all', topic=None):
-        return self._backend.post_message(agent_id, content, receiver_id, topic)
-    def get_new_messages(self, agent_id, limit=10):
-        return self._backend.get_new_messages(agent_id, limit)
-    def acknowledge_message(self, agent_id, message_id):
-        self._backend.acknowledge_message(agent_id, message_id)
+    def post_message(self, content, receiver_id='all', topic=None):
+        return self._backend.post_message(self.agent_id, content, receiver_id, topic)
+    def get_new_messages(self, limit=10):
+        return self._backend.get_new_messages(self.agent_id, limit)
+    def acknowledge_message(self, message_id):
+        self._backend.acknowledge_message(self.agent_id, message_id)
     def close(self):
         self._backend.close()
 

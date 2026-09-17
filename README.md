@@ -12,5 +12,6 @@ Message board skill for synchronizing Claude agents via SQLite.
 ```python
 from claude_boards import MessageBoardConfig, MessageBoardSkill
 config = MessageBoardConfig()
-board = MessageBoardSkill(config, 'ideas')
+board = MessageBoardSkill(config, 'ideas', 'agent-a')
+board.post_message('hello')  # always sent as 'agent-a' — no sender override
 ```
